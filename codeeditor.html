@@ -1,0 +1,338 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Code Editor</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600&display=swap" rel="stylesheet">
+    <style>
+        /* Base styles for the body, font, and background */
+        body {
+            font-family: 'Inter', sans-serif;
+            background-color: #1a202c; /* Dark background */
+            color: #e2e8f0; /* Light text */
+            display: flex;
+            flex-direction: column;
+            min-height: 100vh; /* Ensure body takes full viewport height */
+        }
+        /* Styling for the editor and output containers */
+        .editor-container, .output-container {
+            background-color: #2d3748; /* Darker grey for code areas */
+            border-radius: 0.5rem; /* Rounded corners */
+            padding: 1rem;
+            box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1); /* Subtle shadow */
+            display: flex;
+            flex-direction: column;
+        }
+        /* Styling for textarea (code editor) and pre (output) elements */
+        textarea, pre {
+            background-color: #1a202c; /* Even darker for actual code background */
+            color: #a0aec0; /* Lighter grey for code text */
+            border: 1px solid #4a5568; /* Border color */
+            border-radius: 0.375rem; /* Rounded corners */
+            padding: 0.75rem;
+            font-family: 'monospace', 'Consolas', 'Monaco', 'Andale Mono', 'Ubuntu Mono'; /* Monospace font for code */
+            font-size: 0.95rem;
+            resize: none; /* Prevent manual resizing */
+            flex-grow: 1; /* Allow textarea/pre to fill available space */
+        }
+        /* Focus styles for textarea and pre */
+        textarea:focus, pre:focus {
+            outline: none; /* Remove default outline */
+            border-color: #63b3ed; /* Highlight border on focus */
+        }
+        /* Base button styles using Tailwind's @apply */
+        .button {
+            @apply px-4 py-2 rounded-md font-semibold transition duration-200 ease-in-out;
+        }
+        /* Primary button style */
+        .button-primary {
+            @apply bg-blue-600 hover:bg-blue-700 text-white;
+        }
+        /* Secondary button style */
+        .button-secondary {
+            @apply bg-gray-700 hover:bg-gray-600 text-white;
+        }
+        /* Danger button style */
+        .button-danger {
+            @apply bg-red-600 hover:bg-red-700 text-white;
+        }
+        /* Custom scrollbar for better aesthetics */
+        ::-webkit-scrollbar {
+            width: 8px;
+            height: 8px;
+        }
+        ::-webkit-scrollbar-track {
+            background: #2d3748;
+            border-radius: 10px;
+        }
+        ::-webkit-scrollbar-thumb {
+            background: #4a5568;
+            border-radius: 10px;
+        }
+        ::-webkit-scrollbar-thumb:hover {
+            background: #63b3ed;
+        }
+    </style>
+</head>
+<body class="flex flex-col h-screen">
+    <div class="flex flex-1 overflow-hidden">
+        <!-- Main Content Area: Editor and Output Panels -->
+        <div class="flex flex-1 flex-col lg:flex-row p-4 gap-4 overflow-hidden">
+            <!-- Editor Panel -->
+            <div class="editor-container flex-1 flex flex-col min-h-[40vh] lg:min-h-0">
+                <div class="flex items-center justify-between mb-4">
+                    <h2 class="text-xl font-semibold text-white">Code Editor</h2>
+                    <!-- Language selection dropdown -->
+                    <select id="languageSelect" class="bg-gray-700 text-white rounded-md p-2">
+                        <option value="python">Python</option>
+                        <option value="javascript">JavaScript</option>
+                        <option value="html">HTML</option>
+                        <option value="css">CSS</option>
+                    </select>
+                </div>
+                <!-- Textarea for code input -->
+                <textarea id="codeEditor" class="flex-1" placeholder="Write your code here..."></textarea>
+                <div class="flex flex-wrap gap-2 mt-4">
+                    <!-- Run Code Button (now just a placeholder for functionality) -->
+                    <button id="runButton" class="button button-primary flex items-center justify-center gap-2">
+                        Run Code (Not Available)
+                    </button>
+                    <!-- Save to Clipboard Button -->
+                    <button id="saveToClipboardButton" class="button button-secondary">Save to Clipboard</button>
+                    <!-- Clear Editor Button -->
+                    <button id="clearEditorButton" class="button button-secondary">Clear Editor</button>
+                </div>
+            </div>
+
+            <!-- Output Panel -->
+            <div class="output-container flex-1 flex flex-col min-h-[30vh] lg:min-h-0">
+                <h2 class="text-xl font-semibold text-white mb-4">Output</h2>
+                <!-- Preformatted text for code output -->
+                <pre id="codeOutput" class="flex-1 overflow-auto whitespace-pre-wrap"></pre>
+            </div>
+        </div>
+
+        <!-- Clipboard Sidebar - Always visible and static -->
+        <div id="clipboardSidebar" class="w-full lg:w-80 bg-gray-800 p-4 flex flex-col overflow-y-auto h-full">
+            <div class="flex justify-between items-center mb-4">
+                <h2 class="text-xl font-semibold text-white">Clipboard</h2>
+            </div>
+            <!-- Container for clipboard items -->
+            <div id="clipboardItems" class="flex-1 space-y-3">
+                <!-- Clipboard items will be dynamically loaded here by JavaScript -->
+            </div>
+        </div>
+    </div>
+
+    <script type="module">
+        // Global variables for Firebase configuration, provided by the Canvas environment.
+        // These are crucial for the application to connect to Firestore for clipboard persistence.
+        const appId = typeof __app_id !== 'undefined' ? __app_id : 'default-app-id';
+        const firebaseConfig = typeof __firebase_config !== 'undefined' ? JSON.parse(__firebase_config) : {};
+        const initialAuthToken = typeof __initial_auth_token !== 'undefined' ? __initial_auth_token : null;
+
+        // Firebase imports from CDN. These are necessary to use Firebase services for the clipboard.
+        import { initializeApp } from 'https://www.gstatic.com/firebasejs/11.6.1/firebase-app.js';
+        import { getAuth, signInAnonymously, signInWithCustomToken, onAuthStateChanged } from 'https://www.gstatic.com/firebasejs/11.6.1/firebase-auth.js';
+        import { getFirestore, doc, getDoc, addDoc, setDoc, updateDoc, deleteDoc, onSnapshot, collection, query, where, getDocs } from 'https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js';
+
+        // Firebase instances and user ID. These will be initialized after the app loads.
+        let app;
+        let db;
+        let auth;
+        let userId = 'anonymous'; // Default to anonymous until authenticated
+
+        // Get references to DOM elements for interaction.
+        const codeEditor = document.getElementById('codeEditor');
+        const codeOutput = document.getElementById('codeOutput');
+        const runButton = document.getElementById('runButton');
+        const saveToClipboardButton = document.getElementById('saveToClipboardButton');
+        const clearEditorButton = document.getElementById('clearEditorButton');
+        const languageSelect = document.getElementById('languageSelect');
+        const clipboardItemsContainer = document.getElementById('clipboardItems');
+        // The clipboardSidebar element is still referenced for initial load message, but its behavior is static now.
+        const clipboardSidebar = document.getElementById('clipboardSidebar');
+
+        /**
+         * Initializes Firebase application and handles user authentication.
+         * It attempts to sign in with a custom token if provided, otherwise anonymously.
+         * It also sets up an observer to listen for changes in the user's sign-in state.
+         * This is necessary for the clipboard functionality to persist data.
+         */
+        async function initializeFirebaseAndAuth() {
+            try {
+                // Initialize Firebase app with the provided configuration.
+                app = initializeApp(firebaseConfig);
+                // Get Firestore and Auth service instances.
+                db = getFirestore(app);
+                auth = getAuth(app);
+
+                // Attempt to sign in with a custom token.
+                if (initialAuthToken) {
+                    await signInWithCustomToken(auth, initialAuthToken);
+                } else {
+                    // If no custom token, sign in anonymously.
+                    await signInAnonymously(auth);
+                }
+
+                // Set up an authentication state observer.
+                onAuthStateChanged(auth, (user) => {
+                    if (user) {
+                        userId = user.uid;
+                        console.log("User signed in:", userId);
+                        loadClipboardItems(); // Load clipboard items once authentication is confirmed.
+                    } else {
+                        userId = crypto.randomUUID(); // Generate a random UUID for anonymous users.
+                        console.log("User signed out or anonymous:", userId);
+                        loadClipboardItems(); // Load clipboard items even for anonymous
+                    }
+                });
+            } catch (error) {
+                console.error("Error initializing Firebase or signing in:", error);
+                codeOutput.textContent = `Error: Could not initialize Firebase for clipboard. Some features may not work. ${error.message}`;
+            }
+        }
+
+        /**
+         * Saves the current code from the editor to the clipboard in Firestore.
+         * Prompts the user for a snippet name.
+         */
+        async function saveCodeToClipboard() {
+            const code = codeEditor.value.trim();
+            if (!code) {
+                codeOutput.textContent = "Cannot save empty code to clipboard.";
+                return;
+            }
+
+            // Prompt for a snippet name.
+            // NOTE: In a production app, replace `prompt()` with a custom modal UI
+            // as `prompt()` can block the UI in an iframe.
+            const snippetName = prompt("Enter a name for this code snippet:");
+            if (!snippetName) {
+                codeOutput.textContent = "Snippet name cannot be empty. Code not saved.";
+                return;
+            }
+
+            try {
+                // Define the Firestore collection path for user-specific clipboard data.
+                const clipboardCollectionRef = collection(db, `artifacts/${appId}/users/${userId}/clipboard`);
+                // Add a new document to the collection with the snippet details.
+                await addDoc(clipboardCollectionRef, {
+                    name: snippetName,
+                    code: code,
+                    timestamp: new Date()
+                });
+                codeOutput.textContent = `Code snippet "${snippetName}" saved to clipboard!`;
+                loadClipboardItems(); // Refresh the list of clipboard items
+            } catch (error) {
+                console.error("Error saving code to clipboard:", error);
+                codeOutput.textContent = `Error saving snippet: ${error.message}`;
+            }
+        }
+
+        /**
+         * Loads all saved code snippets from Firestore and displays them in the clipboard sidebar.
+         * Attaches event listeners to load and delete buttons for each snippet.
+         */
+        async function loadClipboardItems() {
+            // Ensure Firestore and user ID are ready before attempting to load.
+            if (!db || !userId) {
+                console.log("Firestore not ready or userId not set. Skipping clipboard load.");
+                return;
+            }
+
+            clipboardItemsContainer.innerHTML = ''; // Clear any existing items in the display
+
+            try {
+                const clipboardCollectionRef = collection(db, `artifacts/${appId}/users/${userId}/clipboard`);
+                const q = query(clipboardCollectionRef);
+                const querySnapshot = await getDocs(q); // Fetch the documents
+
+                if (querySnapshot.empty) {
+                    clipboardItemsContainer.innerHTML = '<p class="text-gray-400">No snippets saved yet.</p>';
+                    return;
+                }
+
+                // Iterate over each document and create a UI element for it.
+                querySnapshot.forEach((docSnap) => {
+                    const data = docSnap.data();
+                    const snippetId = docSnap.id;
+                    const itemDiv = document.createElement('div');
+                    itemDiv.className = 'bg-gray-700 p-3 rounded-md shadow-md flex flex-col space-y-2';
+                    itemDiv.innerHTML = `
+                        <h3 class="font-semibold text-blue-300">${data.name}</h3>
+                        <pre class="bg-gray-800 text-gray-300 p-2 rounded-md text-sm overflow-auto max-h-24">${data.code}</pre>
+                        <div class="flex gap-2">
+                            <button class="button button-primary text-sm py-1 flex-1 load-snippet" data-id="${snippetId}" data-code="${encodeURIComponent(data.code)}">Load</button>
+                            <button class="button button-danger text-sm py-1 flex-1 delete-snippet" data-id="${snippetId}">Delete</button>
+                        </div>
+                    `;
+                    clipboardItemsContainer.appendChild(itemDiv);
+                });
+
+                // Add event listeners to the dynamically created "Load" buttons.
+                document.querySelectorAll('.load-snippet').forEach(button => {
+                    button.onclick = (event) => {
+                        const code = decodeURIComponent(event.target.dataset.code);
+                        codeEditor.value = code; // Set the editor's content to the loaded snippet
+                        codeOutput.textContent = `Snippet "${event.target.closest('.flex-col').querySelector('h3').textContent}" loaded.`;
+                    };
+                });
+
+                // Add event listeners to the dynamically created "Delete" buttons.
+                document.querySelectorAll('.delete-snippet').forEach(button => {
+                    button.onclick = async (event) => {
+                        const snippetId = event.target.dataset.id;
+                        // Confirm deletion with the user.
+                        // NOTE: In a production app, replace `confirm()` with a custom modal UI.
+                        if (confirm("Are you sure you want to delete this snippet?")) {
+                            try {
+                                // Delete the document from Firestore.
+                                await deleteDoc(doc(db, `artifacts/${appId}/users/${userId}/clipboard`, snippetId));
+                                codeOutput.textContent = "Snippet deleted.";
+                                loadClipboardItems(); // Refresh the list after deletion.
+                            } catch (error) {
+                                console.error("Error deleting snippet:", error);
+                                codeOutput.textContent = `Error deleting snippet: ${error.message}`;
+                            }
+                        }
+                    };
+                });
+
+            } catch (error) {
+                console.error("Error loading clipboard items:", error);
+                clipboardItemsContainer.innerHTML = `<p class="text-red-400">Error loading clipboard: ${error.message}</p>`;
+            }
+        }
+
+        // --- Event Listeners ---
+        // The run button now only displays a message as execution is not available.
+        runButton.addEventListener('click', () => {
+            codeOutput.textContent = "Code execution is not available without an AI/API connection.";
+        });
+        saveToClipboardButton.addEventListener('click', saveCodeToClipboard);
+        clearEditorButton.addEventListener('click', () => {
+            codeEditor.value = ''; // Clear the editor's content
+            codeOutput.textContent = 'Editor cleared.'; // Update output message
+        });
+
+        // Initial setup when the window loads.
+        window.onload = () => {
+            initializeFirebaseAndAuth(); // Initialize Firebase and authentication for the clipboard.
+
+            // Initial message in the output area.
+            codeOutput.textContent = "Welcome to the Code Editor! Code execution is not available. You can write code and use the clipboard feature.";
+        };
+
+        // NOTE ON SYNTAX HIGHLIGHTING:
+        // This application uses a simple textarea for code input.
+        // Implementing robust, real-time syntax highlighting for multiple languages
+        // purely with client-side JavaScript and CSS without external libraries
+        // (like CodeMirror or Monaco Editor) is highly complex and performance-intensive.
+        // Therefore, full syntax highlighting is not a primary feature of this demonstration.
+        // The focus is on the editor functionality and the clipboard.
+    </script>
+</body>
+</html>
